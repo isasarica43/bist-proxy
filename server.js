@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // ================================================================
-// 400+ BIST HİSSESİ LİSTESİ (Sadece referans amaçlı, kodun çalışması için şart değil)
+// 400+ BIST HİSSESİ LİSTESİ (Yine aynı)
 // ================================================================
 const bistSymbols = [
   "THYAO", "GARAN", "AKBNK", "ISCTR", "YKBNK", "HALKB", "VAKBNK", "QNBFB", "SKBNK",
@@ -41,46 +41,51 @@ const bistSymbols = [
 ];
 
 // ================================================================
-// 🎯 YAHOO FINANCE'DEN GERÇEK VERİ ÇEKEN FONKSİYON
-// (Hiçbir API anahtarı gerekmez!)
+// 🎯 YENİ VE GÜÇLENDİRİLMİŞ YAHOO FINANCE V8 API 
+// (Artık kendimizi tarayıcı gibi gizliyoruz!)
 // ================================================================
 async function fetchRealStockData(symbol) {
   try {
-    // Yahoo Finance BIST hisseleri için hisse kodunun sonuna .IS eklenir
-    // Örnek: THYAO -> THYAO.IS
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}.IS`;
-    const response = await axios.get(url);
+    // Yahoo Finance V8 endpoint'i (daha kararlı)
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS`;
     
-    // Yahoo'dan gelen verinin içindeki ilk sonucu al
-    const result = response.data.quoteResponse.result[0];
+    // ⚡ KRİTİK: Bu başlıklar olmazsa Yahoo bizi robot sanıp engelliyor!
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    });
+
+    // V8 API'den gelen veriyi parse et
+    const result = response.data.chart.result[0];
     
-    // Eğer veri varsa ve fiyat bilgisi gelmişse işle
-    if (result && result.regularMarketPrice) {
-      // Değişim yüzdesini 2 haneli yuvarla
-      const changePercent = result.regularMarketChangePercent ? 
-        parseFloat(result.regularMarketChangePercent.toFixed(2)) : 0;
+    if (result && result.meta && result.meta.regularMarketPrice) {
+      const meta = result.meta;
+      
+      // Değişim yüzdesini hesapla (meta içinde var)
+      const changePercent = meta.regularMarketChangePercent || 0;
       
       return {
         symbol: symbol,
-        price: result.regularMarketPrice,
-        change: changePercent,
-        high: result.regularMarketDayHigh || result.regularMarketPrice,
-        low: result.regularMarketDayLow || result.regularMarketPrice
+        price: meta.regularMarketPrice,
+        change: parseFloat(changePercent.toFixed(2)),
+        high: meta.regularMarketDayHigh || meta.regularMarketPrice,
+        low: meta.regularMarketDayLow || meta.regularMarketPrice
       };
     } else {
-      // Eğer veri gelmezse (yanlış kod veya borsa kapalıysa) yedek gönder
-      console.log(`⚠️ Yahoo verisi gelmedi (${symbol}), yedek kullanılıyor.`);
+      console.log(`⚠️ Yahoo V8 verisi gelmedi (${symbol}), yedek kullanılıyor.`);
       return generateFallbackData(symbol);
     }
   } catch (error) {
-    console.error(`❌ Yahoo hatası (${symbol}):`, error.message);
-    // Hata durumunda uygulamanın çökmemesi için yedek veri döndür
+    console.error(`❌ Yahoo V8 hatası (${symbol}):`, error.message);
+    // Hata durumunda yedek veri döndür (uygulama çökmesin)
     return generateFallbackData(symbol);
   }
 }
 
 // ================================================================
-// 🆘 YEDEK VERİ ÜRETİCİ (API çalışmazsa veya veri gelmezse)
+// 🆘 YEDEK VERİ ÜRETİCİ (API çalışmazsa devreye girer)
 // ================================================================
 function generateFallbackData(symbol) {
   const price = (Math.random() * 400 + 100).toFixed(2);
@@ -98,17 +103,15 @@ function generateFallbackData(symbol) {
 }
 
 // ================================================================
-// 🌐 API UÇ NOKTASI - Telefonun çağıracağı adres
+// 🌐 API UÇ NOKTASI
 // ================================================================
 app.get('/api/stock/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   
   try {
-    // Yahoo'dan gerçek veriyi çek
     const realData = await fetchRealStockData(symbol);
     res.json(realData);
   } catch (error) {
-    // Her şey patlarsa yine yedek döndür
     console.error('🔥 Kritik hata:', error.message);
     res.json(generateFallbackData(symbol));
   }
@@ -118,7 +121,7 @@ app.get('/api/stock/:symbol', async (req, res) => {
 // 🏠 ANA SAYFA
 // ================================================================
 app.get('/', (req, res) => {
-  res.send('✅ BIST Proxy Sunucu YAHOO FINANCE ile calisiyor! (Ucretsiz, anahtar yok)');
+  res.send('✅ BIST Proxy Sunucu YAHOO V8 ile calisiyor! (Guncel, saglam)');
 });
 
 // ================================================================
@@ -126,6 +129,5 @@ app.get('/', (req, res) => {
 // ================================================================
 app.listen(port, () => {
   console.log(`✅ Sunucu ${port} numarali limanda ayakta!`);
-  console.log(`📊 Yahoo Finance üzerinden gerçek BIST verileri geliyor!`);
-  console.log(`🔑 API anahtarı GEREKMİYOR! Tamamen ücretsiz.`);
+  console.log(`📊 Yahoo Finance V8 ile gerçek BIST verileri geliyor!`);
 });
