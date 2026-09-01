@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // ================================================================
-// 400+ BIST HİSSESİ LİSTESİ (Yine aynı)
+// 400+ BIST HİSSESİ LİSTESİ (Bu liste, hangilerinin BIST olduğunu anlamak için)
 // ================================================================
 const bistSymbols = [
   "THYAO", "GARAN", "AKBNK", "ISCTR", "YKBNK", "HALKB", "VAKBNK", "QNBFB", "SKBNK",
@@ -41,15 +41,27 @@ const bistSymbols = [
 ];
 
 // ================================================================
-// 🎯 YENİ VE GÜÇLENDİRİLMİŞ YAHOO FINANCE V8 API 
-// (Artık kendimizi tarayıcı gibi gizliyoruz!)
+// 🎯 AKILLI VERİ ÇEKİCİ (BIST mi, ABD mi otomatik anlar!)
 // ================================================================
 async function fetchRealStockData(symbol) {
   try {
-    // Yahoo Finance V8 endpoint'i (daha kararlı)
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS`;
+    let symbolQuery = symbol;
     
-    // ⚡ KRİTİK: Bu başlıklar olmazsa Yahoo bizi robot sanıp engelliyor!
+    // 📌 AKILLI KONTROL: Eğer bu hisse BIST listesindeyse veya .IS ile bitiyorsa BIST'tir.
+    // Değilse direkt ABD hissesi olarak sorgula.
+    if (bistSymbols.includes(symbol) || symbol.endsWith('.IS')) {
+      // BIST ise, .IS ekle (zaten varsa tekrar ekleme)
+      if (!symbol.endsWith('.IS')) {
+        symbolQuery = symbol + '.IS';
+      }
+      console.log(`📊 BIST hissesi sorgulanıyor: ${symbolQuery}`);
+    } else {
+      // ABD hissesi (Apple, Tesla, Google vs.) direkt sorgulanır.
+      console.log(`🇺🇸 ABD hissesi sorgulanıyor: ${symbolQuery}`);
+    }
+
+    // Yahoo Finance V8 API'ye istek at
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbolQuery}`;
     const response = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -57,29 +69,25 @@ async function fetchRealStockData(symbol) {
       }
     });
 
-    // V8 API'den gelen veriyi parse et
     const result = response.data.chart.result[0];
     
     if (result && result.meta && result.meta.regularMarketPrice) {
       const meta = result.meta;
-      
-      // Değişim yüzdesini hesapla (meta içinde var)
       const changePercent = meta.regularMarketChangePercent || 0;
       
       return {
-        symbol: symbol,
+        symbol: symbol, // Kullanıcının girdiği orijinal kodu göster (AAPL, THYAO)
         price: meta.regularMarketPrice,
         change: parseFloat(changePercent.toFixed(2)),
         high: meta.regularMarketDayHigh || meta.regularMarketPrice,
         low: meta.regularMarketDayLow || meta.regularMarketPrice
       };
     } else {
-      console.log(`⚠️ Yahoo V8 verisi gelmedi (${symbol}), yedek kullanılıyor.`);
+      console.log(`⚠️ Veri gelmedi (${symbol}), yedek kullanılıyor.`);
       return generateFallbackData(symbol);
     }
   } catch (error) {
-    console.error(`❌ Yahoo V8 hatası (${symbol}):`, error.message);
-    // Hata durumunda yedek veri döndür (uygulama çökmesin)
+    console.error(`❌ Yahoo hatası (${symbol}):`, error.message);
     return generateFallbackData(symbol);
   }
 }
@@ -103,7 +111,7 @@ function generateFallbackData(symbol) {
 }
 
 // ================================================================
-// 🌐 API UÇ NOKTASI
+// 🌐 API UÇ NOKTASI - Telefonun çağıracağı adres
 // ================================================================
 app.get('/api/stock/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
@@ -121,7 +129,7 @@ app.get('/api/stock/:symbol', async (req, res) => {
 // 🏠 ANA SAYFA
 // ================================================================
 app.get('/', (req, res) => {
-  res.send('✅ BIST Proxy Sunucu YAHOO V8 ile calisiyor! (Guncel, saglam)');
+  res.send('✅ BIST + ABD Proxy Sunucu (Yahoo Finance) calisiyor!');
 });
 
 // ================================================================
@@ -129,5 +137,5 @@ app.get('/', (req, res) => {
 // ================================================================
 app.listen(port, () => {
   console.log(`✅ Sunucu ${port} numarali limanda ayakta!`);
-  console.log(`📊 Yahoo Finance V8 ile gerçek BIST verileri geliyor!`);
+  console.log(`🌍 BIST ve ABD hisseleri icin hazir!`);
 });
