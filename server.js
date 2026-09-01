@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -7,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // ================================================================
-// İŞTE BIST 500'E YAKIN HİSSE KODU (400+ adet)
+// 400+ BIST HİSSESİ LİSTESİ (Sadece referans amaçlı, kodun çalışması için şart değil)
 // ================================================================
 const bistSymbols = [
   "THYAO", "GARAN", "AKBNK", "ISCTR", "YKBNK", "HALKB", "VAKBNK", "QNBFB", "SKBNK",
@@ -36,81 +37,95 @@ const bistSymbols = [
   "ERSU", "ESCOM", "ETILR", "ETYAT", "EUYO", "FADE", "FENER", "FMIZP", "FONET", 
   "FRK", "GARFA", "GEDZA", "GENIL", "GENUS", "GEREL", "GIPTA", "GLCYH", "GLCMB", 
   "GLPET", "GMPWR", "GOKNR", "GOLTS", "GOREN", "GRNYO", "GRTRK", "GSRAY", "GSDDE", 
-  "GSDHO", "GSKN", "GSTE", "GTSUR", "GUNDG", "GURSO", "GUSGR", "GUVEN", "HALK", 
-  "HARHL", "HASEL", "HDFGS", "HDRGY", "HILAL", "HOROZ", "HRKET", "HUBVC", "HURGZ", 
-  "ICBCT", "IHRGM", "IHYAY", "IKAS", "IKLAS", "KCAER", "KDSAZ", "KERVT", "KFEIN", 
-  "KGYO", "KILER", "KLSER", "KNFRT", "KOCMT", "KOKS", "KONTR", "KRDNA", "KRONT", 
-  "KRPLS", "KSTAR", "KTSKR", "KUYAS", "KW", "LIDER", "LIDFA", "LKMNH", "LOGO", 
-  "LRSHO", "LUKSK", "MACKO", "MARDN", "MARKA", "MAVI", "MDOG", "MERCN", "METAL", 
-  "METUR", "MHRGY", "MIPAZ", "MOTIL", "MPARK", "MRGYO", "MSGYO", "MSTL", "MTRKS", 
-  "MTRYO", "MUTLU", "NAYAT", "NETA", "NETAS", "NIBAS", "NOLAK", "NOS", "NUROC", 
-  "NUSEL", "ODA", "OHRIP", "ONRYT", "ORGE", "ORKL", "ORMA", "OSMEN", "OTTO", 
-  "OYAYO", "OZKGY", "OZRDN", "OZSUB", "PAGYO", "PANEL", "PARSN", "PASHA", "PENGD", 
-  "PERG", "PETUN", "PINS", "PNRYO", "POLTK", "PRKAB", "PSDEU", "QNFLX", "QNBTR", 
-  "RAYSG", "RHEA", "RODRG", "ROYAL", "RUTOM", "RYGYO", "SAGYO", "SALHL", "SANEL", 
-  "SARKY", "SAVER", "SEKUR", "SELGD", "SERVE", "SFRD", "SGLY", "SILVR", "SISEC", 
-  "SKTAS", "SMRTG", "SNGYO", "SNKRN", "SNPA", "SOLAR", "SONY", "SORDM", "SRTYO", 
-  "STFA", "STMAS", "SUCEN", "TARC", "TATEN", "TBORG", "TCMB", "TEB", "TEBNK", 
-  "TEKBA", "TEKMA", "TETOL", "TGSAS", "TGTY", "TINT", "TKBNK", "TKNSK", "TKSW", 
-  "TLMAN", "TOSBF", "TRCAS", "TRDCD", "TRILC", "TRNSK", "TRYAB", "TSPOR", "TURK", 
-  "TUTKL", "TWC", "UCOLA", "UHDE", "ULVU", "UNLU", "UTEUR", "UTTSM", "VANGD", 
-  "VERVE", "VFGYO", "VIKING", "VKF", "VNFA", "YAPRK", "YATAS", "YBTAS", "YGSG", 
-  "YIGTT", "YONGA", "ZEDUR", "ZRGYO", "EGEP", "EGG", "EGS", "EIS", "EM", "EMC", 
-  "EML", "EN", "ENA", "ENC", "END", "ENE", "ENG", "ENH", "ENI", "ENR", "ENS", 
-  "ENT", "EPI", "EPR", "EPT", "ER", "ERA", "ERB", "ERC", "ERD", "ERE", "ERF", 
-  "ERG", "ERH", "ERI", "ERK", "ERL", "ERM", "ERN", "ERO", "ERP", "ERT", "ERU", 
-  "ERV", "ERY", "ES", "ESA", "ESB", "ESC", "ESD", "ESE", "ESF", "ESG", "ESH", 
-  "ESI", "ESK", "ESL", "ESM", "ESO", "ESP", "ESR", "EST", "ESU", "ESY", "ET", 
-  "ETA", "ETB", "ETC", "ETE", "ETF", "ETG", "ETH", "ETI", "ETK", "ETL", "ETM", 
-  "ETN", "ETO", "ETP", "ETR", "ETT", "ETU", "ETY", "EU", "EUB", "EUH", "EUP", 
-  "EUR", "EUS", "EUT", "EVA", "EVG", "EVK", "EVR", "EVS", "EVT", "EVY", "EW", 
-  "EWI", "EWR", "EWS", "EXA", "EXC", "EXI", "EXO", "EXP", "EXR", "EXT", "EYA"
+  "GSDHO", "GSKN", "GSTE", "GTSUR", "GUNDG", "GURSO", "GUSGR", "GUVEN", "HALK"
 ];
 
-// ------------------------------------------------------------
-// Herhangi bir hisse için rastgele veri üreten fonksiyon
-// ------------------------------------------------------------
-function generateMockDataForSymbol(symbol) {
-  const basePrice = (Math.random() * 100 + 5).toFixed(2);
-  const change = (Math.random() * 10 - 5).toFixed(2);
-  const high = (parseFloat(basePrice) + (Math.random() * 5)).toFixed(2);
-  const low = (parseFloat(basePrice) - (Math.random() * 5)).toFixed(2);
+// ================================================================
+// 🎯 YAHOO FINANCE'DEN GERÇEK VERİ ÇEKEN FONKSİYON
+// (Hiçbir API anahtarı gerekmez!)
+// ================================================================
+async function fetchRealStockData(symbol) {
+  try {
+    // Yahoo Finance BIST hisseleri için hisse kodunun sonuna .IS eklenir
+    // Örnek: THYAO -> THYAO.IS
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}.IS`;
+    const response = await axios.get(url);
+    
+    // Yahoo'dan gelen verinin içindeki ilk sonucu al
+    const result = response.data.quoteResponse.result[0];
+    
+    // Eğer veri varsa ve fiyat bilgisi gelmişse işle
+    if (result && result.regularMarketPrice) {
+      // Değişim yüzdesini 2 haneli yuvarla
+      const changePercent = result.regularMarketChangePercent ? 
+        parseFloat(result.regularMarketChangePercent.toFixed(2)) : 0;
+      
+      return {
+        symbol: symbol,
+        price: result.regularMarketPrice,
+        change: changePercent,
+        high: result.regularMarketDayHigh || result.regularMarketPrice,
+        low: result.regularMarketDayLow || result.regularMarketPrice
+      };
+    } else {
+      // Eğer veri gelmezse (yanlış kod veya borsa kapalıysa) yedek gönder
+      console.log(`⚠️ Yahoo verisi gelmedi (${symbol}), yedek kullanılıyor.`);
+      return generateFallbackData(symbol);
+    }
+  } catch (error) {
+    console.error(`❌ Yahoo hatası (${symbol}):`, error.message);
+    // Hata durumunda uygulamanın çökmemesi için yedek veri döndür
+    return generateFallbackData(symbol);
+  }
+}
+
+// ================================================================
+// 🆘 YEDEK VERİ ÜRETİCİ (API çalışmazsa veya veri gelmezse)
+// ================================================================
+function generateFallbackData(symbol) {
+  const price = (Math.random() * 400 + 100).toFixed(2);
+  const change = (Math.random() * 6 - 3).toFixed(2);
+  const high = (parseFloat(price) + (Math.random() * 5)).toFixed(2);
+  const low = (parseFloat(price) - (Math.random() * 5)).toFixed(2);
   return {
     symbol: symbol,
-    price: parseFloat(basePrice),
+    price: parseFloat(price),
     change: parseFloat(change),
     high: parseFloat(high),
-    low: parseFloat(low)
+    low: parseFloat(low),
+    note: "⚠️ Yahoo verisi alınamadı, yedek veri gösteriliyor."
   };
 }
 
-// Listedeki HER BİR hisse için otomatik mock veri oluştur
-const mockData = {};
-bistSymbols.forEach(sym => {
-  mockData[sym] = generateMockDataForSymbol(sym);
-});
-
-// ------------------------------------------------------------
-// API Uç Noktası - Telefonun çağıracağı adres
-// ------------------------------------------------------------
-app.get('/api/stock/:symbol', (req, res) => {
+// ================================================================
+// 🌐 API UÇ NOKTASI - Telefonun çağıracağı adres
+// ================================================================
+app.get('/api/stock/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   
-  if (mockData[symbol]) {
-    // Listede varsa hazır veriyi gönder
-    res.json(mockData[symbol]);
-  } else {
-    // Listede YOKSA bile rastgele veri üret ve gönder -> ASLA HATA YOK!
-    res.json(generateMockDataForSymbol(symbol));
+  try {
+    // Yahoo'dan gerçek veriyi çek
+    const realData = await fetchRealStockData(symbol);
+    res.json(realData);
+  } catch (error) {
+    // Her şey patlarsa yine yedek döndür
+    console.error('🔥 Kritik hata:', error.message);
+    res.json(generateFallbackData(symbol));
   }
 });
 
-// Ana sayfa
+// ================================================================
+// 🏠 ANA SAYFA
+// ================================================================
 app.get('/', (req, res) => {
-  res.send('BIST Proxy Sunucu basariyla calisiyor! (400+ hisse hazir)');
+  res.send('✅ BIST Proxy Sunucu YAHOO FINANCE ile calisiyor! (Ucretsiz, anahtar yok)');
 });
 
-// Sunucuyu başlat
+// ================================================================
+// 🚀 SUNUCUYU BAŞLAT
+// ================================================================
 app.listen(port, () => {
-  console.log(`Sunucu ${port} numarali limanda (port) ayakta!`);
+  console.log(`✅ Sunucu ${port} numarali limanda ayakta!`);
+  console.log(`📊 Yahoo Finance üzerinden gerçek BIST verileri geliyor!`);
+  console.log(`🔑 API anahtarı GEREKMİYOR! Tamamen ücretsiz.`);
 });
