@@ -150,87 +150,50 @@ app.get('/api/history', async (req, res) => {
 // Tarayıcı TEFAS'a doğrudan istek atamadığı (CORS) için sunucu üzerinden.
 // /api/fund/TTE?days=365
 // ================================================================
-function trDate(d) {
-  return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear();
-}
-// TEFAS bazı yurt dışı sunucuları engelleyebiliyor; önce oturum çerezini alıp,
-// olmazsa İngilizce sitesi fundturkey.com.tr üzerinden dener.
-const TEFAS_HOSTS = ['https://www.tefas.gov.tr', 'https://fundturkey.com.tr'];
-const tefasCookies = {};
-async function tefasCookie(host) {
-  const c = tefasCookies[host];
-  if (c && Date.now() - c.at < 20 * 60 * 1000) return c.value;
-  try {
-    const r = await axios.get(host + '/TarihselVeriler.aspx', { timeout: 15000, headers: { 'User-Agent': YAHOO_HEADERS['User-Agent'] }, validateStatus: () => true });
-    const value = (r.headers['set-cookie'] || []).map(x => x.split(';')[0]).join('; ');
-    tefasCookies[host] = { at: Date.now(), value };
-    return value;
-  } catch (e) { return ''; }
-}
-async function tefasRange(code, start, end, diag) {
-  let reached = false;
-  for (const host of TEFAS_HOSTS) {
-    const cookie = await tefasCookie(host);
-    for (const fontip of ['YAT', 'EMK', 'BYF']) {
-      try {
-        const body = new URLSearchParams({ fontip, sfontur: '', fonkod: code, fongrup: '', bastarih: trDate(start), bittarih: trDate(end), fonturkod: '', fonunvantip: '' }).toString();
-        const response = await axios.post(host + '/api/DB/BindHistoryInfo', body, {
-          timeout: 15000,
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'User-Agent': YAHOO_HEADERS['User-Agent'],
-            'Origin': host,
-            'Referer': host + '/TarihselVeriler.aspx',
-            ...(cookie ? { Cookie: cookie } : {})
-          }
-        });
-        if (!response.data || typeof response.data !== 'object') { diag.push(`${host} ${fontip}: JSON değil (engel sayfası olabilir)`); continue; }
-        reached = true;
-        const rows = (response.data.data || []).filter(r => Number(r.FIYAT) > 0);
-        diag.push(`${host} ${fontip}: ${rows.length} satır`);
-        if (rows.length) return { rows, reached };
-      } catch (error) {
-        diag.push(`${host} ${fontip}: ${error.response ? 'HTTP ' + error.response.status : error.message}`);
-      }
-    }
-    if (reached) break; // bu sunucu cevap verdi ama fon yok; diğerini denemeye gerek yok
-  }
-  return { rows: [], reached };
+// TEFAS 2026'da eski BindHistoryInfo adresini kapattı; yeni JSON API:
+// POST https://www.tefas.gov.tr/api/funds/fonFiyatBilgiGetir  {"fonKodu":"TTE","dil":"TR","periyod":<ay>}
+// periyod sadece 1, 3, 6, 12, 36, 60 olabilir. Not: TEFAS yurt dışı sunucuları engelleyebiliyor;
+// uygulama bu yüzden önce telefondan bağlanıyor, burası yedek yol.
+const TEFAS_PERIODS = [1, 3, 6, 12, 36, 60];
+function parseTefasDate(v) {
+  if (v == null) return null;
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  const m2 = String(v).match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if (m2) return Date.UTC(+m2[3], +m2[2] - 1, +m2[1]);
+  const t = Date.parse(v); return isNaN(t) ? null : t;
 }
 app.get('/api/fund/:code', async (req, res) => {
   const code = String(req.params.code || '').toUpperCase().trim();
-  const days = Math.min(1100, Math.max(7, parseInt(req.query.days, 10) || 14));
+  const days = Math.min(1825, Math.max(7, parseInt(req.query.days, 10) || 14));
+  const periyod = TEFAS_PERIODS.find(p => p * 30 >= days) || 60;
   const debug = req.query.debug === '1';
   if (!/^[A-Z0-9]{2,6}$/.test(code)) return res.status(400).json({ error: 'invalid_code' });
-  const diag = [];
   try {
-    const data = await cached(`fund:${code}:${days}`, 30 * 60 * 1000, async () => {
-      const all = new Map();
-      let name = null, anyReached = false;
-      // TEFAS tek istekte en fazla ~3 ay veriyor; geriye doğru parça parça çek
-      for (let back = 0; back < days; back += 89) {
-        const end = new Date(); end.setDate(end.getDate() - back);
-        const start = new Date(end); start.setDate(start.getDate() - Math.min(88, days - back));
-        const { rows, reached } = await tefasRange(code, start, end, diag);
-        anyReached = anyReached || reached;
-        if (!rows.length && back === 0) break; // fon hiç yoksa / erişim yoksa uğraşma
-        rows.forEach(r => { all.set(Number(r.TARIH), Number(r.FIYAT)); if (!name && r.FONUNVAN) name = r.FONUNVAN; });
+    const data = await cached(`fund2:${code}:${periyod}`, 30 * 60 * 1000, async () => {
+      const response = await axios.post('https://www.tefas.gov.tr/api/funds/fonFiyatBilgiGetir',
+        { fonKodu: code, dil: 'TR', periyod },
+        { timeout: 20000, validateStatus: () => true,
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*', 'User-Agent': YAHOO_HEADERS['User-Agent'], 'Origin': 'https://www.tefas.gov.tr', 'Referer': 'https://www.tefas.gov.tr/' } });
+      const body = response.data;
+      if (response.status < 200 || response.status >= 300 || !body || typeof body !== 'object') {
+        return { reached: false, history: [], diag: `HTTP ${response.status}${typeof body === 'string' ? ' (JSON değil)' : ''}` };
       }
-      const history = Array.from(all.entries()).sort((a, b) => a[0] - b[0]).map(([t, c]) => ({ t, c }));
-      return { code, name, history, reached: anyReached };
+      const list = Array.isArray(body) ? body : (body.resultList || body.data || []);
+      let name = null;
+      const history = list.map(r => { if (!name && r.fonUnvan) name = r.fonUnvan; return { t: parseTefasDate(r.tarih), c: Number(r.fiyat) }; })
+        .filter(x => x.t != null && x.c > 0).sort((a, b) => a.t - b.t);
+      return { reached: true, name, history, diag: `${history.length} kayıt` };
     });
     if (!data.history.length) {
-      cache.delete(`fund:${code}:${days}`);
-      // reached=false → TEFAS bu sunucuya hiç cevap vermedi (engel); true → fon gerçekten bulunamadı
-      return res.status(data.reached ? 404 : 502).json({ error: data.reached ? 'not_found' : 'tefas_unreachable', code, ...(debug ? { diag } : {}) });
+      cache.delete(`fund2:${code}:${periyod}`);
+      return res.status(data.reached ? 404 : 502).json({ error: data.reached ? 'not_found' : 'tefas_unreachable', code, ...(debug ? { diag: data.diag } : {}) });
     }
     const last = data.history[data.history.length - 1];
-    res.json({ code, name: data.name, price: last.c, date: new Date(last.t).toISOString().slice(0, 10), history: data.history, ...(debug ? { diag } : {}) });
+    res.json({ code, name: data.name, price: last.c, date: new Date(last.t).toISOString().slice(0, 10), history: data.history, ...(debug ? { diag: data.diag } : {}) });
   } catch (error) {
     console.error(`🔥 TEFAS hatası (${code}):`, error.message);
-    res.status(502).json({ error: 'upstream_error', code, ...(debug ? { diag } : {}) });
+    res.status(502).json({ error: 'upstream_error', code, ...(debug ? { diag: error.message } : {}) });
   }
 });
 
