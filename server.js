@@ -153,56 +153,84 @@ app.get('/api/history', async (req, res) => {
 function trDate(d) {
   return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear();
 }
-async function tefasRange(code, start, end) {
-  for (const fontip of ['YAT', 'EMK', 'BYF']) {
-    try {
-      const body = new URLSearchParams({ fontip, sfontur: '', fonkod: code, fongrup: '', bastarih: trDate(start), bittarih: trDate(end), fonturkod: '', fonunvantip: '' }).toString();
-      const response = await axios.post('https://www.tefas.gov.tr/api/DB/BindHistoryInfo', body, {
-        timeout: 15000,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest',
-          'User-Agent': YAHOO_HEADERS['User-Agent'],
-          'Origin': 'https://www.tefas.gov.tr',
-          'Referer': 'https://www.tefas.gov.tr/TarihselVeriler.aspx'
-        }
-      });
-      const rows = ((response.data && response.data.data) || []).filter(r => Number(r.FIYAT) > 0);
-      if (rows.length) return { rows, fontip };
-    } catch (error) {
-      console.log(`⏳ TEFAS ${fontip} denemesi başarısız (${code}):`, error.message);
+// TEFAS bazı yurt dışı sunucuları engelleyebiliyor; önce oturum çerezini alıp,
+// olmazsa İngilizce sitesi fundturkey.com.tr üzerinden dener.
+const TEFAS_HOSTS = ['https://www.tefas.gov.tr', 'https://fundturkey.com.tr'];
+const tefasCookies = {};
+async function tefasCookie(host) {
+  const c = tefasCookies[host];
+  if (c && Date.now() - c.at < 20 * 60 * 1000) return c.value;
+  try {
+    const r = await axios.get(host + '/TarihselVeriler.aspx', { timeout: 15000, headers: { 'User-Agent': YAHOO_HEADERS['User-Agent'] }, validateStatus: () => true });
+    const value = (r.headers['set-cookie'] || []).map(x => x.split(';')[0]).join('; ');
+    tefasCookies[host] = { at: Date.now(), value };
+    return value;
+  } catch (e) { return ''; }
+}
+async function tefasRange(code, start, end, diag) {
+  let reached = false;
+  for (const host of TEFAS_HOSTS) {
+    const cookie = await tefasCookie(host);
+    for (const fontip of ['YAT', 'EMK', 'BYF']) {
+      try {
+        const body = new URLSearchParams({ fontip, sfontur: '', fonkod: code, fongrup: '', bastarih: trDate(start), bittarih: trDate(end), fonturkod: '', fonunvantip: '' }).toString();
+        const response = await axios.post(host + '/api/DB/BindHistoryInfo', body, {
+          timeout: 15000,
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'User-Agent': YAHOO_HEADERS['User-Agent'],
+            'Origin': host,
+            'Referer': host + '/TarihselVeriler.aspx',
+            ...(cookie ? { Cookie: cookie } : {})
+          }
+        });
+        if (!response.data || typeof response.data !== 'object') { diag.push(`${host} ${fontip}: JSON değil (engel sayfası olabilir)`); continue; }
+        reached = true;
+        const rows = (response.data.data || []).filter(r => Number(r.FIYAT) > 0);
+        diag.push(`${host} ${fontip}: ${rows.length} satır`);
+        if (rows.length) return { rows, reached };
+      } catch (error) {
+        diag.push(`${host} ${fontip}: ${error.response ? 'HTTP ' + error.response.status : error.message}`);
+      }
     }
+    if (reached) break; // bu sunucu cevap verdi ama fon yok; diğerini denemeye gerek yok
   }
-  return { rows: [], fontip: null };
+  return { rows: [], reached };
 }
 app.get('/api/fund/:code', async (req, res) => {
   const code = String(req.params.code || '').toUpperCase().trim();
   const days = Math.min(1100, Math.max(7, parseInt(req.query.days, 10) || 14));
+  const debug = req.query.debug === '1';
   if (!/^[A-Z0-9]{2,6}$/.test(code)) return res.status(400).json({ error: 'invalid_code' });
+  const diag = [];
   try {
     const data = await cached(`fund:${code}:${days}`, 30 * 60 * 1000, async () => {
       const all = new Map();
-      let name = null;
+      let name = null, anyReached = false;
       // TEFAS tek istekte en fazla ~3 ay veriyor; geriye doğru parça parça çek
       for (let back = 0; back < days; back += 89) {
         const end = new Date(); end.setDate(end.getDate() - back);
         const start = new Date(end); start.setDate(start.getDate() - Math.min(88, days - back));
-        const { rows } = await tefasRange(code, start, end);
-        if (!rows.length && back === 0) break; // fon hiç yoksa uğraşma
+        const { rows, reached } = await tefasRange(code, start, end, diag);
+        anyReached = anyReached || reached;
+        if (!rows.length && back === 0) break; // fon hiç yoksa / erişim yoksa uğraşma
         rows.forEach(r => { all.set(Number(r.TARIH), Number(r.FIYAT)); if (!name && r.FONUNVAN) name = r.FONUNVAN; });
       }
       const history = Array.from(all.entries()).sort((a, b) => a[0] - b[0]).map(([t, c]) => ({ t, c }));
-      return { code, name, history };
+      return { code, name, history, reached: anyReached };
     });
     if (!data.history.length) {
       cache.delete(`fund:${code}:${days}`);
-      return res.status(404).json({ error: 'not_found', code });
+      // reached=false → TEFAS bu sunucuya hiç cevap vermedi (engel); true → fon gerçekten bulunamadı
+      return res.status(data.reached ? 404 : 502).json({ error: data.reached ? 'not_found' : 'tefas_unreachable', code, ...(debug ? { diag } : {}) });
     }
     const last = data.history[data.history.length - 1];
-    res.json({ code, name: data.name, price: last.c, date: new Date(last.t).toISOString().slice(0, 10), history: data.history });
+    res.json({ code, name: data.name, price: last.c, date: new Date(last.t).toISOString().slice(0, 10), history: data.history, ...(debug ? { diag } : {}) });
   } catch (error) {
     console.error(`🔥 TEFAS hatası (${code}):`, error.message);
-    res.status(502).json({ error: 'upstream_error', code });
+    res.status(502).json({ error: 'upstream_error', code, ...(debug ? { diag } : {}) });
   }
 });
 
