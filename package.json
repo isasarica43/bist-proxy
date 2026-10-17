@@ -1,7 +1,7 @@
 {
   "name": "bist-proxy-api",
-  "version": "1.0.0",
-  "description": "BIST hisse fiyatlarini WebView uygulamasina CORS-uyumlu sekilde sunan basit proxy API",
+  "version": "1.1.0",
+  "description": "Yatirim Takip uygulamasi icin hisse, gecmis mum ve TEFAS fon verisini CORS-uyumlu sunan proxy API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,8 +10,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "axios": "^1.7.9",
     "cors": "^2.8.5",
-    "@muhammedaksam/borsats": "latest"
+    "express": "^4.19.2"
   }
 }
